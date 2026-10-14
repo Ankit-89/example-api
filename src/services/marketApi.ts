@@ -4,15 +4,93 @@ export type MarketData = {
   price: number;
 };
 
-type MarketApiOptions = {
+export type MarketApiOptions = {
+  timeoutMs?: number;
   maxRetries?: number;
   retryDelayMs?: number;
+  fetchImpl?: typeof fetch;
 };
 
-const inFlightRequests = new Map<string, Promise<MarketData>>();
+export class HttpError extends Error {
+  constructor(public readonly status: number) {
+    super(`HTTP ${status}`);
+    this.name = "HttpError";
+  }
+}
 
-const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
+export class MarketDataValidationError extends Error {
+  constructor(message = "Invalid market data response") {
+    super(message);
+    this.name = "MarketDataValidationError";
+  }
+}
+
+const inFlight = new Map<string, Promise<MarketData>>();
+
+function isRetryable(error: unknown): boolean {
+  if (error instanceof MarketDataValidationError) {
+    return false;
+  }
+
+  if (error instanceof HttpError) {
+    return [429, 500, 502, 503, 504].includes(error.status);
+  }
+
+  // Network failures and abort timeouts are transient candidates.
+  return true;
+}
+
+async function fetchOnce(
+  symbol: string,
+  fetchImpl: typeof fetch,
+  timeoutMs: number
+): Promise<MarketData> {
+  const controller = new AbortController();
+  let timeoutTriggered = false;
+
+  const timeout = setTimeout(() => {
+    timeoutTriggered = true;
+    controller.abort();
+  }, timeoutMs);
+
+  try {
+    const response = await fetchImpl(
+      `/api/market-data?symbol=${encodeURIComponent(symbol)}`,
+      { signal: controller.signal }
+    );
+
+    if (!response.ok) {
+      throw new HttpError(response.status);
+    }
+
+    // The same timeout also covers response body parsing.
+    const payload: unknown = await response.json();
+
+    if (
+      typeof payload !== "object" ||
+      payload === null ||
+      !("price" in payload) ||
+      typeof payload.price !== "number" ||
+      !Number.isFinite(payload.price) ||
+      payload.price < 0
+    ) {
+      throw new MarketDataValidationError();
+    }
+
+    return {
+      symbol,
+      price: payload.price
+    };
+  } catch (error) {
+    if (timeoutTriggered) {
+      throw new Error("Market data request timed out");
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 export async function getMarketData(
   symbol: string,
@@ -24,74 +102,45 @@ export async function getMarketData(
     throw new Error("Symbol is required");
   }
 
-  const existing = inFlightRequests.get(normalizedSymbol);
-  if (existing) return existing;
+  const existing = inFlight.get(normalizedSymbol);
 
-  const request = fetchWithRetry(normalizedSymbol, options).finally(
-    () => {
-      inFlightRequests.delete(normalizedSymbol);
-    }
-  );
+  if (existing) {
+    return existing;
+  }
 
-  inFlightRequests.set(normalizedSymbol, request);
-  return request;
-}
-
-async function fetchWithRetry(
-  symbol: string,
-  options: MarketApiOptions
-): Promise<MarketData> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const timeoutMs = options.timeoutMs ?? 5000;
   const maxRetries = options.maxRetries ?? 2;
-  const retryDelayMs = options.retryDelayMs ?? 200;
+  const retryDelayMs = options.retryDelayMs ?? 100;
 
-  for (let attempt = 0; ; attempt++) {
-    try {
-      const response = await fetch(
-        `/api/market-data?symbol=${encodeURIComponent(symbol)}`
-      );
+  const request = (async () => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await fetchOnce(
+          normalizedSymbol,
+          fetchImpl,
+          timeoutMs
+        );
+      } catch (error) {
+        if (!isRetryable(error) || attempt >= maxRetries) {
+          throw error;
+        }
 
-      if (!response.ok) {
-        const error = new Error(`HTTP ${response.status}`);
-        Object.assign(error, { status: response.status });
-        throw error;
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, retryDelayMs * 2 ** attempt);
+        });
       }
+    }
+  })();
 
-      const data: unknown = await response.json();
+  inFlight.set(normalizedSymbol, request);
 
-      if (
-        typeof data !== "object" ||
-        data === null ||
-        !("price" in data) ||
-        typeof data.price !== "number" ||
-        !Number.isFinite(data.price) ||
-        data.price < 0
-      ) {
-        throw new Error("Invalid market data response");
-      }
-
-      return { symbol, price: data.price };
-    } catch (error) {
-      const status =
-        typeof error === "object" &&
-        error !== null &&
-        "status" in error
-          ? error.status
-          : undefined;
-
-      const retryable =
-        status === undefined ||
-        status === 429 ||
-        status === 500 ||
-        status === 502 ||
-        status === 503 ||
-        status === 504;
-
-      if (!retryable || attempt >= maxRetries) {
-        throw error;
-      }
-
-      // Exponential backoff: 200ms, 400ms, 800ms...
-      await sleep(retryDelayMs * 2 ** attempt);
+  try {
+    return await request;
+  } finally {
+    // Don't delete a newer request if this implementation is extended later.
+    if (inFlight.get(normalizedSymbol) === request) {
+      inFlight.delete(normalizedSymbol);
     }
   }
 }
