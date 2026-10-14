@@ -1,44 +1,97 @@
 
-type MarketData = {
+export type MarketData = {
+  symbol: string;
   price: number;
+};
+
+type MarketApiOptions = {
+  maxRetries?: number;
+  retryDelayMs?: number;
 };
 
 const inFlightRequests = new Map<string, Promise<MarketData>>();
 
-export async function getMarketData(
-  symbol: string
-): Promise<MarketData> {
-  const existingRequest = inFlightRequests.get(symbol);
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
-  if (existingRequest) {
-    return existingRequest;
+export async function getMarketData(
+  symbol: string,
+  options: MarketApiOptions = {}
+): Promise<MarketData> {
+  const normalizedSymbol = symbol.trim().toUpperCase();
+
+  if (!normalizedSymbol) {
+    throw new Error("Symbol is required");
   }
 
-  const request = fetch(
-    `/api/market-data?symbol=${encodeURIComponent(symbol)}`
-  )
-    .then(async (response) => {
-      if (response.status === 429) {
-        throw new Error("Rate limit exceeded. Please retry later.");
-      }
+  const existing = inFlightRequests.get(normalizedSymbol);
+  if (existing) return existing;
+
+  const request = fetchWithRetry(normalizedSymbol, options).finally(
+    () => {
+      inFlightRequests.delete(normalizedSymbol);
+    }
+  );
+
+  inFlightRequests.set(normalizedSymbol, request);
+  return request;
+}
+
+async function fetchWithRetry(
+  symbol: string,
+  options: MarketApiOptions
+): Promise<MarketData> {
+  const maxRetries = options.maxRetries ?? 2;
+  const retryDelayMs = options.retryDelayMs ?? 200;
+
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const response = await fetch(
+        `/api/market-data?symbol=${encodeURIComponent(symbol)}`
+      );
 
       if (!response.ok) {
-        throw new Error(`API request failed: ${response.status}`);
+        const error = new Error(`HTTP ${response.status}`);
+        Object.assign(error, { status: response.status });
+        throw error;
       }
 
-      const data = await response.json();
+      const data: unknown = await response.json();
 
-      if (typeof data.price !== "number") {
+      if (
+        typeof data !== "object" ||
+        data === null ||
+        !("price" in data) ||
+        typeof data.price !== "number" ||
+        !Number.isFinite(data.price) ||
+        data.price < 0
+      ) {
         throw new Error("Invalid market data response");
       }
 
-      return data as MarketData;
-    })
-    .finally(() => {
-      inFlightRequests.delete(symbol);
-    });
+      return { symbol, price: data.price };
+    } catch (error) {
+      const status =
+        typeof error === "object" &&
+        error !== null &&
+        "status" in error
+          ? error.status
+          : undefined;
 
-  inFlightRequests.set(symbol, request);
+      const retryable =
+        status === undefined ||
+        status === 429 ||
+        status === 500 ||
+        status === 502 ||
+        status === 503 ||
+        status === 504;
 
-  return request;
+      if (!retryable || attempt >= maxRetries) {
+        throw error;
+      }
+
+      // Exponential backoff: 200ms, 400ms, 800ms...
+      await sleep(retryDelayMs * 2 ** attempt);
+    }
+  }
 }
