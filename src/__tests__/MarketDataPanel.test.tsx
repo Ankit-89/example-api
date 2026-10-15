@@ -1,6 +1,5 @@
 
 import { render, screen, fireEvent, act } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { MarketDataPanel } from "../components/MarketDataPanel";
 import type { MarketData } from "../services/marketApi";
 
@@ -28,8 +27,6 @@ describe("MarketDataPanel", () => {
   });
 
   it("displays data after a successful request", async () => {
-    const user = userEvent.setup();
-
     const loadMarketData = jest.fn(
       async (symbol: string): Promise<MarketData> => ({
         symbol,
@@ -39,9 +36,7 @@ describe("MarketDataPanel", () => {
 
     render(<MarketDataPanel loadMarketData={loadMarketData} />);
 
-    await user.click(
-      screen.getByRole("button", { name: "Load market data" })
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Load market data" }));
 
     expect(await screen.findByText("Symbol: NIFTY"))
       .toBeInTheDocument();
@@ -53,8 +48,6 @@ describe("MarketDataPanel", () => {
   });
 
   it("shows a loading indicator and disables the button", async () => {
-    const user = userEvent.setup();
-
     let resolveRequest!: (data: MarketData) => void;
 
     const loadMarketData = jest.fn(
@@ -65,9 +58,7 @@ describe("MarketDataPanel", () => {
 
     render(<MarketDataPanel loadMarketData={loadMarketData} />);
 
-    await user.click(
-      screen.getByRole("button", { name: "Load market data" })
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Load market data" }));
 
     expect(screen.getByRole("status"))
       .toHaveTextContent("Fetching market data...");
@@ -82,8 +73,6 @@ describe("MarketDataPanel", () => {
   });
 
   it("shows an error when the API request fails", async () => {
-    const user = userEvent.setup();
-
     const loadMarketData = jest.fn(
       async (): Promise<MarketData> => {
         throw new Error("Rate limit exceeded");
@@ -92,17 +81,13 @@ describe("MarketDataPanel", () => {
 
     render(<MarketDataPanel loadMarketData={loadMarketData} />);
 
-    await user.click(
-      screen.getByRole("button", { name: "Load market data" })
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Load market data" }));
 
     expect(await screen.findByRole("alert"))
       .toHaveTextContent("Rate limit exceeded");
   });
 
   it("loads the symbol selected by the user", async () => {
-    const user = userEvent.setup();
-
     const loadMarketData = jest.fn(
       async (symbol: string): Promise<MarketData> => ({
         symbol,
@@ -112,14 +97,10 @@ describe("MarketDataPanel", () => {
 
     render(<MarketDataPanel loadMarketData={loadMarketData} />);
 
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: "Select symbol" }),
-      "BANKNIFTY"
-    );
-
-    await user.click(
-      screen.getByRole("button", { name: "Load market data" })
-    );
+    fireEvent.change(screen.getByRole("combobox", { name: "Select symbol" }), {
+      target: { value: "BANKNIFTY" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Load market data" }));
 
     expect(await screen.findByText("Symbol: BANKNIFTY"))
       .toBeInTheDocument();
@@ -128,8 +109,6 @@ describe("MarketDataPanel", () => {
   });
 
   it("clears old data when loading a new request", async () => {
-    const user = userEvent.setup();
-
     const loadMarketData = jest.fn()
       .mockResolvedValueOnce({
         symbol: "NIFTY",
@@ -141,16 +120,12 @@ describe("MarketDataPanel", () => {
 
     render(<MarketDataPanel loadMarketData={loadMarketData} />);
 
-    await user.click(
-      screen.getByRole("button", { name: "Load market data" })
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Load market data" }));
 
     expect(await screen.findByText("Price: 25000"))
       .toBeInTheDocument();
 
-    await user.click(
-      screen.getByRole("button", { name: "Load market data" })
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Load market data" }));
 
     expect(screen.queryByText("Price: 25000"))
       .not.toBeInTheDocument();
@@ -158,8 +133,6 @@ describe("MarketDataPanel", () => {
   });
 
   it("clears an earlier error after a successful retry", async () => {
-    const user = userEvent.setup();
-
     const loadMarketData = jest.fn()
       .mockRejectedValueOnce(new Error("Network error"))
       .mockResolvedValueOnce({
@@ -169,16 +142,12 @@ describe("MarketDataPanel", () => {
 
     render(<MarketDataPanel loadMarketData={loadMarketData} />);
 
-    await user.click(
-      screen.getByRole("button", { name: "Load market data" })
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Load market data" }));
 
     expect(await screen.findByRole("alert"))
       .toHaveTextContent("Network error");
 
-    await user.click(
-      screen.getByRole("button", { name: "Load market data" })
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Load market data" }));
 
     expect(await screen.findByText("Price: 25000"))
       .toBeInTheDocument();
