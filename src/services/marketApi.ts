@@ -1,4 +1,7 @@
-export type MarketData = { symbol: string; price: number };
+export type MarketData = {
+  symbol: string;
+  price: number;
+};
 
 export type MarketApiOptions = {
   timeoutMs?: number;
@@ -21,14 +24,30 @@ export class MarketDataValidationError extends Error {
   }
 }
 
+// Dedicated error for malformed JSON responses.
+// This error is non-retryable.
+export class MarketDataParseError extends Error {
+  constructor(message = 'Response body is not valid JSON') {
+    super(message);
+    this.name = 'MarketDataParseError';
+  }
+}
+
 const inFlightRequests = new Map<string, Promise<MarketData>>();
 
 function isRetryable(error: unknown): boolean {
-  if (error instanceof MarketDataValidationError) return false;
+  if (
+    error instanceof MarketDataValidationError ||
+    error instanceof MarketDataParseError
+  ) {
+    return false;
+  }
+
   if (error instanceof HttpError) {
     return [429, 500, 502, 503, 504].includes(error.status);
   }
-  // Network errors and AbortError from our own timeout are treated as transient.
+
+  // Network errors and timeout errors are treated as transient.
   return true;
 }
 
@@ -40,14 +59,15 @@ async function fetchOnce(
   const controller = new AbortController();
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
 
-  // Promise.race guarantees this attempt settles on timeout even if an injected
-  // transport (such as a test double) ignores AbortSignal. Aborting still asks
-  // real fetch to stop its underlying network operation.
   const timeoutPromise = new Promise<never>((_resolve, reject) => {
     timeoutHandle = setTimeout(() => {
       controller.abort();
-      const error = new Error(`Request timed out after ${timeoutMs}ms`);
+
+      const error = new Error(
+        `Request timed out after ${timeoutMs}ms`
+      );
       error.name = 'TimeoutError';
+
       reject(error);
     }, timeoutMs);
   });
@@ -58,35 +78,46 @@ async function fetchOnce(
       { signal: controller.signal }
     );
 
-    if (!response.ok) throw new HttpError(response.status);
+    if (!response.ok) {
+      throw new HttpError(response.status);
+    }
 
     let payload: unknown;
+
     try {
       payload = await response.json();
-    } catch (error) {
-      // JSON.parse failures are deterministic contract errors, not transient
-      // network failures. Keep them out of the retry path.
-      if (error instanceof SyntaxError) {
-        throw new MarketDataValidationError('Response body is not valid JSON');
-      }
-      throw error;
+    } catch {
+      // Any failure while parsing the response body is treated as
+      // a non-retryable response parsing error.
+      throw new MarketDataParseError();
     }
 
     if (
-      typeof payload !== 'object' || payload === null ||
-      !('price' in payload) || typeof payload.price !== 'number' ||
-      !Number.isFinite(payload.price) || payload.price < 0
+      typeof payload !== 'object' ||
+      payload === null ||
+      !('price' in payload) ||
+      typeof payload.price !== 'number' ||
+      !Number.isFinite(payload.price) ||
+      payload.price < 0
     ) {
       throw new MarketDataValidationError();
     }
 
-    return { symbol, price: payload.price };
+    return {
+      symbol,
+      price: payload.price
+    };
   })();
 
   try {
-    return await Promise.race([requestPromise, timeoutPromise]);
+    return await Promise.race([
+      requestPromise,
+      timeoutPromise
+    ]);
   } finally {
-    if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+    if (timeoutHandle !== undefined) {
+      clearTimeout(timeoutHandle);
+    }
   }
 }
 
@@ -95,27 +126,44 @@ export async function getMarketData(
   options: MarketApiOptions = {}
 ): Promise<MarketData> {
   const normalizedSymbol = symbol.trim().toUpperCase();
-  if (!normalizedSymbol) throw new Error('Symbol is required');
+
+  if (!normalizedSymbol) {
+    throw new Error('Symbol is required');
+  }
 
   const existing = inFlightRequests.get(normalizedSymbol);
-  if (existing) return existing;
+
+  if (existing) {
+    return existing;
+  }
 
   const fetchImpl = options.fetchImpl ?? fetch;
   const timeoutMs = options.timeoutMs ?? 5000;
   const maxRetries = options.maxRetries ?? 2;
   const retryDelayMs = options.retryDelayMs ?? 100;
 
-  // Every attempt has a timeout. Retries are bounded; finally clears the
-  // in-flight entry so a failed request cannot permanently block this symbol.
   const request = (async () => {
     for (let attempt = 0; ; attempt++) {
       try {
-        return await fetchOnce(normalizedSymbol, fetchImpl, timeoutMs);
-      } catch (error) {
-        if (!isRetryable(error) || attempt >= maxRetries) throw error;
-        await new Promise<void>((resolve) =>
-          setTimeout(resolve, retryDelayMs * 2 ** attempt)
+        return await fetchOnce(
+          normalizedSymbol,
+          fetchImpl,
+          timeoutMs
         );
+      } catch (error) {
+        if (
+          !isRetryable(error) ||
+          attempt >= maxRetries
+        ) {
+          throw error;
+        }
+
+        await new Promise<void>((resolve) => {
+          setTimeout(
+            resolve,
+            retryDelayMs * 2 ** attempt
+          );
+        });
       }
     }
   })().finally(() => {
@@ -125,6 +173,7 @@ export async function getMarketData(
   });
 
   inFlightRequests.set(normalizedSymbol, request);
+
   return request;
 }
 

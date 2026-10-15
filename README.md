@@ -18,7 +18,7 @@ npm test
 npm run typecheck
 ```
 
-`npm test` runs `jest --runInBand`. TypeScript `ignoreDeprecations: "6.0"` is set explicitly in `tsconfig.json` for the pinned TypeScript 5.7.2 compiler.
+`npm test` runs `jest --runInBand`. TypeScript `ignoreDeprecations: "5.0"` is set explicitly in `tsconfig.json` for the pinned TypeScript 5.7.2 compiler.
 
 ## Retry and timeout behavior
 - `maxRetries` means retries **after** the initial attempt. The default is 2 retries (3 total attempts).
