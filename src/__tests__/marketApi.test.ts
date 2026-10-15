@@ -9,7 +9,7 @@ import {
 const response = (status: number, body: unknown): Response => ({
   ok: status >= 200 && status < 300,
   status,
-  json: jest.fn().mockResolvedValue(body),
+  json: jest.fn<() => Promise<unknown>>().mockResolvedValue(body),
 } as unknown as Response);
 
 beforeEach(() => {
@@ -102,7 +102,7 @@ describe('getMarketData', () => {
     const malformedResponse = {
       ok: true,
       status: 200,
-      json: jest.fn().mockRejectedValue(new SyntaxError('Unexpected token')),
+      json: jest.fn<() => Promise<unknown>>().mockRejectedValue(new SyntaxError('Unexpected token')),
     } as unknown as Response;
     const fetchMock = jest.fn<typeof fetch>().mockResolvedValue(malformedResponse);
 
