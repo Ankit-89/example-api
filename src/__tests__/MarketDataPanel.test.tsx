@@ -1,8 +1,14 @@
 
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MarketDataPanel } from "../components/MarketDataPanel";
 import type { MarketData } from "../services/marketApi";
+
+function deferred<T>() {
+  let resolve!: (v: T) => void;
+  const promise = new Promise<T>((res) => { resolve = res; });
+  return { promise, resolve };
+}
 
 describe("MarketDataPanel", () => {
   it("renders the initial UI", () => {
@@ -179,4 +185,21 @@ describe("MarketDataPanel", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(loadMarketData).toHaveBeenCalledTimes(2);
   });
+
+  test("a stale response cannot overwrite the newer symbol's quote", async () => {
+  const first = deferred<MarketData>();
+  const second = deferred<MarketData>();
+  const load = jest.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+  render(<MarketDataPanel loadMarketData={load} />);
+
+  fireEvent.click(screen.getByRole("button", { name: /load market data/i }));
+  fireEvent.change(screen.getByLabelText(/select symbol/i), { target: { value: "BANKNIFTY" } });
+  fireEvent.click(screen.getByRole("button", { name: /load market data/i }));
+
+  await act(async () => { second.resolve({ symbol: "BANKNIFTY", price: 200 }); });
+  await act(async () => { first.resolve({ symbol: "NIFTY", price: 100 }); }); // late
+
+  expect(screen.getByText("Symbol: BANKNIFTY")).toBeTruthy();
+  expect(screen.queryByText("Symbol: NIFTY")).toBeNull();
+});
 });

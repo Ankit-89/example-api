@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2022", "module": "CommonJS", "moduleResolution": "Node",
-    "strict": true, "ignoreDeprecations": "6.0", "esModuleInterop": true, "jsx": "react-jsx",
+    "strict": true, "ignoreDeprecations": "5.0", "esModuleInterop": true, "jsx": "react-jsx",
     "forceConsistentCasingInFileNames": true, "skipLibCheck": true,
     "types": ["jest", "node", "@testing-library/jest-dom"],
     "lib": ["ES2022", "DOM"], "rootDir": "src", "outDir": "dist"
