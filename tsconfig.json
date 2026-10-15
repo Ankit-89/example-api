@@ -1,16 +1,10 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
-    "module": "CommonJS",
-    "moduleResolution": "Node",
-    "ignoreDeprecations": "6.0",
-    "strict": true,
-    "esModuleInterop": true,
-    "jsx": "react-jsx",
-    "lib": ["ES2022", "DOM"],
-    "types": ["jest", "node"],
-    "skipLibCheck": true,
-    "noEmit": true
+    "target": "ES2022", "module": "CommonJS", "moduleResolution": "Node",
+    "strict": true, "ignoreDeprecations": "5.0", "esModuleInterop": true, "jsx": "react-jsx",
+    "forceConsistentCasingInFileNames": true, "skipLibCheck": true,
+    "types": ["jest", "node", "@testing-library/jest-dom"],
+    "lib": ["ES2022", "DOM"], "outDir": "dist"
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "jest.setup.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx"]
 }

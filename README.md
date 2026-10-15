@@ -1,7 +1,7 @@
 # React + TypeScript + Jest market-data example
 
-## Versions pinned in package.json
-- Node.js: v22.16.0 (environment used to run this project)
+## Pinned toolchain
+- Node.js: v22.16.0 (runtime used for validation)
 - React / React DOM: 18.3.1
 - Jest / jest-environment-jsdom: 29.7.0
 - ts-jest: 29.2.5
@@ -9,20 +9,30 @@
 - @testing-library/react: 16.1.0
 - @testing-library/jest-dom: 6.6.3
 
-## Run
+Exact dependency versions are pinned in `package.json`. For a reproducible install, generate and commit `package-lock.json` with `npm install` in the target repository, then use `npm ci` in CI.
+
+## Commands
 ```bash
 npm install
 npm test
+npm run typecheck
 ```
-Test command: `jest --runInBand`.
 
-## Decisions
-- `fetchImpl` is injected for deterministic tests. No `stubGlobal` or `unstubAllGlobals` is used.
-- Each attempt uses `AbortController` with a timeout. Standard browser `fetch` rejects when its signal is aborted; the in-flight promise then settles, retries are bounded, and `finally` removes the deduplication entry.
-- Default retries: 2 retries after the initial request (3 total attempts).
-- HTTP 429 is treated as transient and retried; persistent 429 therefore causes 3 attempts by default. In production, honor `Retry-After` when present and add jitter.
-- Invalid JSON / invalid price is a `MarketDataValidationError` and is not retried. Retrying malformed payloads will not fix a deterministic contract mismatch and needlessly repeats load.
-- Ordinary 4xx responses such as 400 are not retried. Network errors and selected 5xx statuses are retried.
-- UI effect cleanup ignores stale results after symbol changes. It does not cancel the shared service request, because cancellation by one component could affect other consumers sharing that request.
+`npm test` runs `jest --runInBand`. TypeScript `ignoreDeprecations: "5.0"` is set explicitly in `tsconfig.json` for the pinned TypeScript 5.7.2 compiler.
 
-This is an illustrative sample, not a claim about changes made in an existing repository.
+## Retry and timeout behavior
+- `maxRetries` means retries **after** the initial attempt. The default is 2 retries (3 total attempts).
+- Each attempt has a timeout. `AbortController` asks a real `fetch` request to stop; `Promise.race` also ensures the attempt settles if a custom transport ignores its signal.
+- When retries are exhausted, the in-flight entry is removed in `finally`, so a later call for the same normalized symbol can start a new request.
+- HTTP 429 and selected 5xx responses (500, 502, 503, 504) are retryable. Other HTTP errors, invalid market-data shapes, and malformed JSON are not retried. Malformed JSON is wrapped as `MarketDataValidationError` rather than being treated as a generic transient error.
+- Network failures and timeouts are treated as transient and are retried up to the configured limit. Production implementations may also honor `Retry-After` and use jitter.
+
+## React stale-result handling
+`MarketQuote` marks each effect invocation inactive during cleanup. A result or error from an older symbol is ignored after the symbol changes, and the previous quote is cleared while the new symbol loads. The shared service request is not cancelled by the component, because another component may be sharing it through request deduplication.
+
+## Test coverage added
+- A transport that ignores abort times out, exhausts its configured retries, and does not leave a stuck in-flight entry; a fresh call for the same symbol then succeeds.
+- Malformed JSON causes one attempt even with default retry settings.
+- A stale response resolving after a symbol change cannot overwrite the newer quote.
+
+The tests use standard Jest APIs and React Testing Library. `fetchImpl` is injected into the service for deterministic API tests; no Vitest-only global stubbing APIs are used.

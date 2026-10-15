@@ -1,21 +1,12 @@
-
 {
-  "name": "market-data-react-jest",
+  "name": "market-data-jest-example",
   "version": "1.0.0",
   "private": true,
-  "scripts": {
-    "test": "jest --runInBand",
-    "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage --runInBand"
-  },
-  "dependencies": {
-    "react": "18.3.1",
-    "react-dom": "18.3.1"
-  },
+  "scripts": { "test": "jest --runInBand", "test:coverage": "jest --coverage --runInBand", "typecheck": "tsc --noEmit" },
+  "dependencies": { "react": "18.3.1", "react-dom": "18.3.1" },
   "devDependencies": {
     "@testing-library/jest-dom": "6.6.3",
     "@testing-library/react": "16.1.0",
-    "@testing-library/user-event": "14.5.2",
     "@types/jest": "29.5.14",
     "@types/node": "22.10.2",
     "@types/react": "18.3.12",
